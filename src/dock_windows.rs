@@ -14,7 +14,8 @@ use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{
-    CreateSolidBrush, GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    CreateSolidBrush, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
@@ -27,6 +28,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
+
+use windows::Win32::UI::WindowsAndMessaging::{SWP_NOZORDER, SW_RESTORE};
 
 use crate::dock::{self, Action, Inputs, Phase, Rect, MARKER_LENGTH, MARKER_THICKNESS};
 
@@ -155,7 +158,54 @@ unsafe fn apply(action: Action, main: HWND, marker: HWND) {
         Action::RemoveMarker => {
             let _ = ShowWindow(marker, SW_HIDE);
         }
+        Action::DockAtTop { cursor } => dock_at_top(main, cursor),
     }
+}
+
+/// Un-maximizes the window and places it against the top of the screen the mouse is on,
+/// centred under the mouse, at its normal size.
+unsafe fn dock_at_top(main: HWND, (cursor_x, cursor_y): (i32, i32)) {
+    let _ = ShowWindow(main, SW_RESTORE);
+    let mut outer = RECT::default();
+    if GetWindowRect(main, &mut outer).is_err() {
+        return;
+    }
+    let mut visible = outer;
+    let _ = DwmGetWindowAttribute(
+        main,
+        DWMWA_EXTENDED_FRAME_BOUNDS,
+        &mut visible as *mut RECT as *mut c_void,
+        std::mem::size_of::<RECT>() as u32,
+    );
+    let mut monitor = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    let screen = MonitorFromPoint(
+        POINT {
+            x: cursor_x,
+            y: cursor_y,
+        },
+        MONITOR_DEFAULTTONEAREST,
+    );
+    if !GetMonitorInfoW(screen, &mut monitor).as_bool() {
+        return;
+    }
+    let work = monitor.rcWork;
+    let width = visible.right - visible.left;
+    let left = (cursor_x - width / 2).clamp(work.left, (work.right - width).max(work.left));
+    // Windows positions the outer frame, which includes invisible borders, so allow for them.
+    let x = left - (visible.left - outer.left);
+    let y = work.top - (visible.top - outer.top);
+    let _ = SetWindowPos(
+        main,
+        None,
+        x,
+        y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+    );
 }
 
 /// The small red bar on the screen edge. It's see-through to the mouse, never takes focus, and

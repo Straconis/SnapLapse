@@ -60,10 +60,16 @@ pub enum Edge {
 }
 
 /// Which edge of the screen area `window` is touching, if any. Top and bottom win over the
-/// sides when the window is in a corner, since a wide window most likely meant those.
+/// sides when the window is in a corner. But a window touching both top and bottom, as Windows'
+/// Snap makes it when dropped on a side, belongs to that side.
 pub fn touching_edge(window: Rect, screen: Rect) -> Option<Edge> {
     let near = |a: i32, b: i32| (a - b).abs() <= SNAP_DISTANCE;
-    if near(window.top, screen.top) {
+    let full_height = near(window.top, screen.top) && near(window.bottom, screen.bottom);
+    if full_height && near(window.left, screen.left) {
+        Some(Edge::Left)
+    } else if full_height && near(window.right, screen.right) {
+        Some(Edge::Right)
+    } else if near(window.top, screen.top) {
         Some(Edge::Top)
     } else if near(window.bottom, screen.bottom) {
         Some(Edge::Bottom)
@@ -146,6 +152,9 @@ pub enum Action {
     Show,
     /// Remove the marker without touching the window, because something else showed it.
     RemoveMarker,
+    /// Windows maximized the window, usually because it was dragged to the top of the screen
+    /// (Aero Snap). Put it back to its normal size, at the top edge under the mouse, so it docks.
+    DockAtTop { cursor: (i32, i32) },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +183,14 @@ pub fn step(phase: Phase, i: &Inputs) -> (Phase, Vec<Action>) {
             Phase::Docked { .. } => (Phase::Free, vec![Action::SetTopmost(false)]),
             Phase::Hidden { .. } => (Phase::Free, vec![Action::Show, Action::SetTopmost(false)]),
         };
+    }
+    if i.window_visible && i.maximized {
+        // With auto-hide on, a full-screen window means "dock me at the top".
+        let mut actions = vec![Action::DockAtTop { cursor: i.cursor }];
+        if matches!(phase, Phase::Docked { .. }) {
+            actions.insert(0, Action::SetTopmost(false));
+        }
+        return (Phase::Free, actions);
     }
     match phase {
         Phase::Free => {
@@ -386,19 +403,62 @@ mod tests {
     }
 
     #[test]
-    fn a_maximized_window_never_docks() {
+    fn dragging_to_the_top_docks_instead_of_going_full_screen() {
+        // Windows' Aero Snap maximizes a window dragged to the top of the screen.
         let full = Rect {
             left: 0,
             top: 0,
             right: 1920,
             bottom: 1040,
         };
-        let mut maximized = inputs(0, full, (900, 10));
+        let mut maximized = inputs(0, full, (900, 0));
         maximized.maximized = true;
-        assert_eq!(step(Phase::Free, &maximized).0, Phase::Free);
+        let (phase, actions) = step(Phase::Free, &maximized);
+        assert_eq!(phase, Phase::Free);
+        assert_eq!(actions, vec![Action::DockAtTop { cursor: (900, 0) }]);
+        // Once Windows has put it back at the top at normal size, it docks.
+        let (phase, actions) = step(phase, &inputs(100, AT_TOP, (900, 5)));
+        assert_eq!(phase, Phase::Docked { away_since: None });
+        assert_eq!(actions, vec![Action::SetTopmost(true)]);
+    }
+
+    #[test]
+    fn maximizing_while_docked_also_docks_at_the_top() {
+        let full = Rect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let mut maximized = inputs(0, full, (300, 0));
+        maximized.maximized = true;
         let (phase, actions) = step(Phase::Docked { away_since: None }, &maximized);
         assert_eq!(phase, Phase::Free);
-        assert_eq!(actions, vec![Action::SetTopmost(false)]);
+        assert_eq!(
+            actions,
+            vec![
+                Action::SetTopmost(false),
+                Action::DockAtTop { cursor: (300, 0) }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_window_snapped_to_half_the_screen_docks_to_that_side() {
+        let left_half = Rect {
+            left: 0,
+            top: 0,
+            right: 960,
+            bottom: 1040,
+        };
+        assert_eq!(touching_edge(left_half, SCREEN), Some(Edge::Left));
+        let right_half = Rect {
+            left: 960,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        assert_eq!(touching_edge(right_half, SCREEN), Some(Edge::Right));
     }
 
     #[test]
