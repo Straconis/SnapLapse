@@ -1,6 +1,6 @@
 [package]
 name = "snaplapse"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2021"
 description = "Timed screenshots of any window, even when it's covered."
 license = "MIT"

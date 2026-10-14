@@ -10,12 +10,14 @@
 /// How close (in pixels) the window must be to an edge to dock there.
 const SNAP_DISTANCE: i32 = 12;
 /// How long the mouse must stay away before the window hides, in milliseconds.
-const HIDE_DELAY_MS: u64 = 700;
+const HIDE_DELAY_MS: u64 = 500;
 /// Extra room around the window that still counts as "on the window", so a slightly shaky
 /// mouse doesn't hide it.
 const WINDOW_MARGIN: i32 = 8;
 /// Extra room around the marker that still counts as pointing at it.
 const MARKER_MARGIN: i32 = 6;
+/// While dragging, an edge this close (in pixels) pulls the window flush against it.
+const MAGNET_DISTANCE: i32 = 16;
 /// The marker's length along the edge, and its thickness.
 pub const MARKER_LENGTH: i32 = 64;
 pub const MARKER_THICKNESS: i32 = 6;
@@ -121,6 +123,35 @@ pub fn marker_rect(edge: Edge, window: Rect, screen: Rect) -> Rect {
     }
 }
 
+/// How far to move a window being dragged so it stays on the screen and, within a few pixels of
+/// an edge, sits flush against it, like a magnet. Returns (dx, dy).
+pub fn magnet_offset(window: Rect, screen: Rect) -> (i32, i32) {
+    fn axis(start: i32, end: i32, min: i32, max: i32) -> i32 {
+        if end - start >= max - min || start - min <= MAGNET_DISTANCE {
+            // Too big to fit, past the edge, or close to it: line up with the start edge.
+            min - start
+        } else if max - end <= MAGNET_DISTANCE {
+            max - end
+        } else {
+            0
+        }
+    }
+    (
+        axis(window.left, window.right, screen.left, screen.right),
+        axis(window.top, window.bottom, screen.top, screen.bottom),
+    )
+}
+
+/// How far to move a docked window so it's completely past `edge`, for sliding out of view.
+pub fn off_screen_offset(edge: Edge, window: Rect, screen: Rect) -> (i32, i32) {
+    match edge {
+        Edge::Top => (0, screen.top - window.bottom),
+        Edge::Bottom => (0, screen.bottom - window.top),
+        Edge::Left => (screen.left - window.right, 0),
+        Edge::Right => (screen.right - window.left, 0),
+    }
+}
+
 /// What the Windows side reports every time it checks, about ten times a second.
 #[derive(Clone, Copy, Debug)]
 pub struct Inputs {
@@ -147,9 +178,9 @@ pub enum Action {
     /// Keep the window above other windows (true while docked) or stop doing so.
     SetTopmost(bool),
     /// Hide the window and show the red marker here.
-    Hide { marker: Rect },
-    /// Show the window and remove the marker.
-    Show,
+    Hide { marker: Rect, edge: Edge },
+    /// Show the window and remove the marker, sliding in from `edge` if given.
+    Show { edge: Option<Edge> },
     /// Remove the marker without touching the window, because something else showed it.
     RemoveMarker,
     /// Windows maximized the window, usually because it was dragged to the top of the screen
@@ -164,7 +195,7 @@ pub enum Phase {
     /// Docked and showing. `away_since` is when the mouse left, if it's away.
     Docked { away_since: Option<u64> },
     /// Docked and hidden, with the marker showing.
-    Hidden { marker: Rect },
+    Hidden { marker: Rect, edge: Edge },
 }
 
 fn dock_edge(i: &Inputs) -> Option<Edge> {
@@ -181,7 +212,10 @@ pub fn step(phase: Phase, i: &Inputs) -> (Phase, Vec<Action>) {
         return match phase {
             Phase::Free => (Phase::Free, vec![]),
             Phase::Docked { .. } => (Phase::Free, vec![Action::SetTopmost(false)]),
-            Phase::Hidden { .. } => (Phase::Free, vec![Action::Show, Action::SetTopmost(false)]),
+            Phase::Hidden { .. } => (
+                Phase::Free,
+                vec![Action::Show { edge: None }, Action::SetTopmost(false)],
+            ),
         };
     }
     if i.window_visible && i.maximized {
@@ -219,7 +253,10 @@ pub fn step(phase: Phase, i: &Inputs) -> (Phase, Vec<Action>) {
             let since = away_since.unwrap_or(i.now_ms);
             if i.now_ms.saturating_sub(since) >= HIDE_DELAY_MS {
                 let marker = marker_rect(edge, i.window, i.screen);
-                (Phase::Hidden { marker }, vec![Action::Hide { marker }])
+                (
+                    Phase::Hidden { marker, edge },
+                    vec![Action::Hide { marker, edge }],
+                )
             } else {
                 (
                     Phase::Docked {
@@ -229,7 +266,7 @@ pub fn step(phase: Phase, i: &Inputs) -> (Phase, Vec<Action>) {
                 )
             }
         }
-        Phase::Hidden { marker } => {
+        Phase::Hidden { marker, edge } => {
             if i.window_visible {
                 // Shown some other way, for example from the tray icon.
                 (
@@ -237,9 +274,12 @@ pub fn step(phase: Phase, i: &Inputs) -> (Phase, Vec<Action>) {
                     vec![Action::RemoveMarker],
                 )
             } else if marker.grown(MARKER_MARGIN).contains(i.cursor) {
-                (Phase::Docked { away_since: None }, vec![Action::Show])
+                (
+                    Phase::Docked { away_since: None },
+                    vec![Action::Show { edge: Some(edge) }],
+                )
             } else {
-                (Phase::Hidden { marker }, vec![])
+                (Phase::Hidden { marker, edge }, vec![])
             }
         }
     }
@@ -340,14 +380,26 @@ mod tests {
             docked,
             &[
                 inputs(0, AT_TOP, (100, 900)),
-                inputs(500, AT_TOP, (100, 900)),
+                inputs(300, AT_TOP, (100, 900)),
             ],
         );
         assert!(actions.is_empty());
         let (phase, actions) = run(phase, &[inputs(800, AT_TOP, (100, 900))]);
         let marker = marker_rect(Edge::Top, AT_TOP, SCREEN);
-        assert_eq!(actions, vec![Action::Hide { marker }]);
-        assert_eq!(phase, Phase::Hidden { marker });
+        assert_eq!(
+            actions,
+            vec![Action::Hide {
+                marker,
+                edge: Edge::Top
+            }]
+        );
+        assert_eq!(
+            phase,
+            Phase::Hidden {
+                marker,
+                edge: Edge::Top
+            }
+        );
 
         // Hidden: moving around elsewhere does nothing; pointing at the marker shows it.
         let mut hidden = inputs(900, AT_TOP, (100, 900));
@@ -355,7 +407,12 @@ mod tests {
         assert_eq!(step(phase, &hidden).1, vec![]);
         hidden.cursor = ((marker.left + marker.right) / 2, 0);
         let (phase, actions) = step(phase, &hidden);
-        assert_eq!(actions, vec![Action::Show]);
+        assert_eq!(
+            actions,
+            vec![Action::Show {
+                edge: Some(Edge::Top)
+            }]
+        );
         assert_eq!(phase, Phase::Docked { away_since: None });
     }
 
@@ -367,7 +424,7 @@ mod tests {
                 inputs(0, AT_TOP, (100, 900)),
                 inputs(400, AT_TOP, (900, 300)), // back on the window
                 inputs(800, AT_TOP, (100, 900)),
-                inputs(1300, AT_TOP, (100, 900)), // only 500 ms away this time
+                inputs(1200, AT_TOP, (100, 900)), // only 400 ms away this time
             ],
         );
         assert!(actions.is_empty());
@@ -474,7 +531,13 @@ mod tests {
     #[test]
     fn showing_from_the_tray_removes_the_marker() {
         let marker = marker_rect(Edge::Top, AT_TOP, SCREEN);
-        let (phase, actions) = step(Phase::Hidden { marker }, &inputs(0, AT_TOP, (100, 900)));
+        let (phase, actions) = step(
+            Phase::Hidden {
+                marker,
+                edge: Edge::Top,
+            },
+            &inputs(0, AT_TOP, (100, 900)),
+        );
         assert_eq!(actions, vec![Action::RemoveMarker]);
         assert_eq!(phase, Phase::Docked { away_since: None });
     }
@@ -485,9 +548,18 @@ mod tests {
         let mut off = inputs(0, AT_TOP, (100, 900));
         off.enabled = false;
         off.window_visible = false;
-        let (phase, actions) = step(Phase::Hidden { marker }, &off);
+        let (phase, actions) = step(
+            Phase::Hidden {
+                marker,
+                edge: Edge::Top,
+            },
+            &off,
+        );
         assert_eq!(phase, Phase::Free);
-        assert_eq!(actions, vec![Action::Show, Action::SetTopmost(false)]);
+        assert_eq!(
+            actions,
+            vec![Action::Show { edge: None }, Action::SetTopmost(false)]
+        );
     }
 
     #[test]
@@ -510,6 +582,44 @@ mod tests {
         let marker = marker_rect(Edge::Right, right, SCREEN);
         assert_eq!(marker.right, SCREEN.right);
         assert_eq!(marker.width(), MARKER_THICKNESS);
+    }
+
+    #[test]
+    fn a_window_dragged_near_an_edge_is_pulled_flush() {
+        let near_top = Rect {
+            left: 700,
+            top: 10,
+            right: 1180,
+            bottom: 650,
+        };
+        assert_eq!(magnet_offset(near_top, SCREEN), (0, -10));
+        let near_right = Rect {
+            left: 1430,
+            top: 300,
+            right: 1910,
+            bottom: 940,
+        };
+        assert_eq!(magnet_offset(near_right, SCREEN), (10, 0));
+        assert_eq!(magnet_offset(IN_MIDDLE, SCREEN), (0, 0));
+        let above = Rect {
+            left: 700,
+            top: -50,
+            right: 1180,
+            bottom: 590,
+        };
+        assert_eq!(magnet_offset(above, SCREEN), (0, 50));
+    }
+
+    #[test]
+    fn sliding_out_moves_the_window_fully_past_its_edge() {
+        assert_eq!(off_screen_offset(Edge::Top, AT_TOP, SCREEN), (0, -640));
+        let right = Rect {
+            left: 1440,
+            top: 200,
+            right: 1920,
+            bottom: 840,
+        };
+        assert_eq!(off_screen_offset(Edge::Right, right, SCREEN), (480, 0));
     }
 
     mod properties {
@@ -564,11 +674,47 @@ mod tests {
                 }
             }
 
+            /// A dragged window that fits always ends up fully on screen, and the magnet never
+            /// leaves it a few pixels short of an edge.
+            #[test]
+            fn the_magnet_keeps_windows_on_screen_and_flush((screen, window) in rects()) {
+                let (dx, dy) = magnet_offset(window, screen);
+                let moved = Rect {
+                    left: window.left + dx, top: window.top + dy,
+                    right: window.right + dx, bottom: window.bottom + dy,
+                };
+                if window.width() <= screen.width() {
+                    prop_assert!(moved.left >= screen.left && moved.right <= screen.right, "{moved:?}");
+                    let gap = (moved.left - screen.left).min(screen.right - moved.right);
+                    prop_assert!(gap == 0 || gap > MAGNET_DISTANCE, "left a {gap}px gap");
+                }
+                if window.height() <= screen.height() {
+                    prop_assert!(moved.top >= screen.top && moved.bottom <= screen.bottom, "{moved:?}");
+                    let gap = (moved.top - screen.top).min(screen.bottom - moved.bottom);
+                    prop_assert!(gap == 0 || gap > MAGNET_DISTANCE, "left a {gap}px gap");
+                }
+            }
+
+            /// Sliding out by the computed amount always clears the screen completely.
+            #[test]
+            fn sliding_out_always_clears_the_screen((screen, window) in rects()) {
+                for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
+                    let (dx, dy) = off_screen_offset(edge, window, screen);
+                    let gone = Rect {
+                        left: window.left + dx, top: window.top + dy,
+                        right: window.right + dx, bottom: window.bottom + dy,
+                    };
+                    let outside = gone.right <= screen.left || gone.left >= screen.right
+                        || gone.bottom <= screen.top || gone.top >= screen.bottom;
+                    prop_assert!(outside, "{edge:?}: {gone:?} still overlaps {screen:?}");
+                }
+            }
+
             /// Turning the toggle off always ends with a normal, visible window.
             #[test]
             fn switching_off_always_restores_the_window((screen, window) in rects(), hidden in any::<bool>()) {
                 let phase = if hidden {
-                    Phase::Hidden { marker: marker_rect(Edge::Top, window, screen) }
+                    Phase::Hidden { marker: marker_rect(Edge::Top, window, screen), edge: Edge::Top }
                 } else {
                     Phase::Docked { away_since: Some(0) }
                 };
@@ -579,7 +725,7 @@ mod tests {
                 let (next, actions) = step(phase, &i);
                 prop_assert_eq!(next, Phase::Free);
                 prop_assert!(actions.contains(&Action::SetTopmost(false)));
-                prop_assert_eq!(actions.contains(&Action::Show), hidden);
+                prop_assert_eq!(actions.contains(&Action::Show { edge: None }), hidden);
             }
         }
     }

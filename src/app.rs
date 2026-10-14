@@ -1,7 +1,6 @@
 //! The SnapLapse window.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -55,8 +54,8 @@ struct App {
     logo: Option<egui::TextureHandle>,
     /// Whether the tray icon exists, so closing to the tray can't hide the window for good.
     has_tray: bool,
-    /// Mirrors the "Auto-hide at screen edge" toggle for the docking thread (Windows only).
-    docking: Option<Arc<AtomicBool>>,
+    /// Whether edge docking is available (Windows only).
+    docking: bool,
 }
 
 impl App {
@@ -287,7 +286,7 @@ impl App {
                 ui.end_row();
             }
 
-            if self.docking.is_some() {
+            if self.docking {
                 ui.label("Screen edge");
                 ui.horizontal(|ui| {
                     let hint = "When on, drag SnapLapse against an edge of the screen to dock it. \
@@ -422,8 +421,9 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.save_settings_if_changed();
-        if let Some(docking) = &self.docking {
-            docking.store(self.settings.edge_autohide, Ordering::Relaxed);
+        #[cfg(windows)]
+        if self.docking {
+            crate::dock_windows::set_enabled(self.settings.edge_autohide);
         }
         let recording = self.is_recording();
         if recording {
@@ -485,18 +485,19 @@ fn install_tray(_cc: &eframe::CreationContext<'_>, _recorder: &SharedRecorder) -
     false
 }
 
-/// Starts edge docking on Windows. Returns the switch that mirrors the app's toggle.
+/// Starts edge docking on Windows. Returns whether it's available.
 #[cfg(windows)]
-fn start_docking(cc: &eframe::CreationContext<'_>, on: bool) -> Option<Arc<AtomicBool>> {
-    let hwnd = main_window(cc)?;
-    let enabled = Arc::new(AtomicBool::new(on));
-    crate::dock_windows::start(hwnd, enabled.clone());
-    Some(enabled)
+fn start_docking(cc: &eframe::CreationContext<'_>, on: bool) -> bool {
+    let Some(hwnd) = main_window(cc) else {
+        return false;
+    };
+    crate::dock_windows::start(hwnd, on);
+    true
 }
 
 #[cfg(not(windows))]
-fn start_docking(_cc: &eframe::CreationContext<'_>, _on: bool) -> Option<Arc<AtomicBool>> {
-    None
+fn start_docking(_cc: &eframe::CreationContext<'_>, _on: bool) -> bool {
+    false
 }
 
 /// An on/off switch, which reads more clearly than a checkbox for settings like this.
