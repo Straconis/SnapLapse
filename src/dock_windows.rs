@@ -35,7 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_MAXIMIZEBOX, WS_POPUP,
 };
 
-use crate::dock::{self, Action, Edge, Inputs, Phase, Rect, MARKER_LENGTH, MARKER_THICKNESS};
+use crate::dock::{self, Action, Edge, Inputs, Phase, Rect, MARKER_THICKNESS, MIN_MARKER_LENGTH};
 
 /// SnapLapse red, #DC2626, in Windows' blue-green-red order.
 const MARKER_COLOR: COLORREF = COLORREF(0x0026_26DC);
@@ -363,7 +363,7 @@ unsafe fn create_marker() -> Option<HWND> {
         WS_POPUP,
         0,
         0,
-        MARKER_LENGTH,
+        MIN_MARKER_LENGTH,
         MARKER_THICKNESS,
         None,
         None,

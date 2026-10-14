@@ -18,8 +18,8 @@ const WINDOW_MARGIN: i32 = 8;
 const MARKER_MARGIN: i32 = 6;
 /// While dragging, an edge this close (in pixels) pulls the window flush against it.
 const MAGNET_DISTANCE: i32 = 16;
-/// The marker's length along the edge, and its thickness.
-pub const MARKER_LENGTH: i32 = 64;
+/// The marker's shortest length (it normally spans the whole window), and its thickness.
+pub const MIN_MARKER_LENGTH: i32 = 24;
 pub const MARKER_THICKNESS: i32 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,12 +84,19 @@ pub fn touching_edge(window: Rect, screen: Rect) -> Option<Edge> {
     }
 }
 
-/// Where the red marker goes: on `edge`, centred on where the window was, and kept on screen.
+/// Where the red marker goes: on `edge`, lined up with the window's sides (or top and bottom),
+/// and kept on screen.
 pub fn marker_rect(edge: Edge, window: Rect, screen: Rect) -> Rect {
+    // Span the window exactly, so the marker outlines where it is and where it will reappear.
     let along = |start: i32, end: i32, min: i32, max: i32| {
-        let centre = (start + end) / 2;
-        let first = (centre - MARKER_LENGTH / 2).clamp(min, (max - MARKER_LENGTH).max(min));
-        (first, first + MARKER_LENGTH)
+        let (first, last) = (start.clamp(min, max), end.clamp(min, max));
+        if last - first >= MIN_MARKER_LENGTH {
+            (first, last)
+        } else {
+            // Barely on screen: keep a small, reachable marker instead.
+            let first = first.min(max - MIN_MARKER_LENGTH).max(min);
+            (first, first + MIN_MARKER_LENGTH)
+        }
     };
     match edge {
         Edge::Top | Edge::Bottom => {
@@ -563,15 +570,11 @@ mod tests {
     }
 
     #[test]
-    fn the_marker_sits_on_the_edge_centred_on_the_window() {
+    fn the_marker_lines_up_with_the_window_like_a_border() {
         let marker = marker_rect(Edge::Top, AT_TOP, SCREEN);
         assert_eq!(marker.top, 0);
         assert_eq!(marker.height(), MARKER_THICKNESS);
-        assert_eq!(marker.width(), MARKER_LENGTH);
-        assert_eq!(
-            (marker.left + marker.right) / 2,
-            (AT_TOP.left + AT_TOP.right) / 2
-        );
+        assert_eq!((marker.left, marker.right), (AT_TOP.left, AT_TOP.right));
 
         let right = Rect {
             left: 1440,
@@ -582,6 +585,7 @@ mod tests {
         let marker = marker_rect(Edge::Right, right, SCREEN);
         assert_eq!(marker.right, SCREEN.right);
         assert_eq!(marker.width(), MARKER_THICKNESS);
+        assert_eq!((marker.top, marker.bottom), (right.top, right.bottom));
     }
 
     #[test]
@@ -665,6 +669,21 @@ mod tests {
                     let m = marker_rect(edge, window, screen);
                     prop_assert!(m.left >= screen.left && m.right <= screen.right, "{m:?} {screen:?}");
                     prop_assert!(m.top >= screen.top && m.bottom <= screen.bottom, "{m:?} {screen:?}");
+                    let (span, on_screen) = match edge {
+                        Edge::Top | Edge::Bottom => (
+                            (m.left, m.right),
+                            (window.left.clamp(screen.left, screen.right), window.right.clamp(screen.left, screen.right)),
+                        ),
+                        Edge::Left | Edge::Right => (
+                            (m.top, m.bottom),
+                            (window.top.clamp(screen.top, screen.bottom), window.bottom.clamp(screen.top, screen.bottom)),
+                        ),
+                    };
+                    if on_screen.1 - on_screen.0 >= MIN_MARKER_LENGTH {
+                        prop_assert_eq!(span, on_screen, "the marker should outline the window");
+                    } else {
+                        prop_assert_eq!(span.1 - span.0, MIN_MARKER_LENGTH);
+                    }
                     match edge {
                         Edge::Top => prop_assert_eq!(m.top, screen.top),
                         Edge::Bottom => prop_assert_eq!(m.bottom, screen.bottom),
