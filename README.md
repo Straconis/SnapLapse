@@ -29,6 +29,7 @@ Each recording gets its own folder, named with its start time and window, such a
 - **Choose the image format:** PNG, JPG or WebP.
 - **Recordings never mix:** each one gets its own folder, or its own ZIP file, named with its start time.
 - **Sortable file names:** files are numbered in order, like `000001 - Foundry VTT.png`.
+- **Close to tray (Windows).** Clicking X hides SnapLapse to an icon by the clock and recording carries on. Click the icon to bring it back, or right-click it to stop recording or quit. You can turn this off in the app.
 - **Stays out of your way.** It never steals focus or moves windows, and it does no work between shots.
 - **One small file to run.** There's nothing else to install.
 

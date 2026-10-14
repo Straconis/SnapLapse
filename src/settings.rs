@@ -44,6 +44,8 @@ pub struct Settings {
     pub format: Format,
     pub method: Method,
     pub output: Output,
+    /// On Windows, the X button hides SnapLapse to the notification area instead of quitting.
+    pub close_to_tray: bool,
     /// Title of the last window recorded, used to preselect it next time.
     pub last_window: Option<String>,
 }
@@ -60,6 +62,7 @@ impl Default for Settings {
             format: Format::Png,
             method: Method::Auto,
             output: Output::Folder,
+            close_to_tray: true,
             last_window: None,
         }
     }

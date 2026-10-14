@@ -128,6 +128,9 @@ impl Stats {
     }
 }
 
+/// The current recording, shared between the window and the tray icon.
+pub type SharedRecorder = Arc<Mutex<Option<Recorder>>>;
+
 type Opener = Box<dyn FnOnce() -> Result<Box<dyn Capturer>, CaptureError> + Send>;
 
 pub struct Recorder {

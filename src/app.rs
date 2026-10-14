@@ -8,7 +8,7 @@ use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, TextStyle, Ve
 
 use crate::capture::{self, Method, WindowInfo};
 use crate::encode::Format;
-use crate::recorder::{Config, Output, Recorder, State};
+use crate::recorder::{Config, Output, Recorder, SharedRecorder, State};
 use crate::settings::{Settings, Unit, MIN_INTERVAL_MS};
 
 const BRAND: Color32 = Color32::from_rgb(0x3B, 0x82, 0xF6);
@@ -18,6 +18,8 @@ const WARN: Color32 = Color32::from_rgb(0xF5, 0x9E, 0x0B);
 
 const ICON_PNG: &[u8] = include_bytes!("../branding/out/icons/snaplapse-256.png");
 const LOGO_PNG: &[u8] = include_bytes!("../branding/out/icons/snaplapse-128.png");
+#[cfg(windows)]
+const TRAY_PNG: &[u8] = include_bytes!("../branding/out/icons/snaplapse-32.png");
 
 pub fn run() -> Result<(), String> {
     let mut viewport = egui::ViewportBuilder::default()
@@ -42,23 +44,32 @@ pub fn run() -> Result<(), String> {
 
 struct App {
     settings: Settings,
+    /// The settings as last written to disk, to save again only when something changes.
+    saved_settings: Settings,
     windows: Vec<WindowInfo>,
     selected: Option<WindowInfo>,
     list_error: Option<String>,
-    recorder: Option<Recorder>,
+    recorder: SharedRecorder,
     logo: Option<egui::TextureHandle>,
+    /// Whether the tray icon exists, so closing to the tray can't hide the window for good.
+    has_tray: bool,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         apply_style(&cc.egui_ctx);
+        let settings = Settings::load();
+        let recorder = SharedRecorder::default();
+        let has_tray = install_tray(cc, &recorder);
         let mut app = App {
-            settings: Settings::load(),
+            saved_settings: settings.clone(),
+            settings,
             windows: Vec::new(),
             selected: None,
             list_error: None,
-            recorder: None,
+            recorder,
             logo: load_logo(&cc.egui_ctx),
+            has_tray,
         };
         app.refresh_windows();
         if let Some(last) = &app.settings.last_window {
@@ -84,8 +95,20 @@ impl App {
         }
     }
 
+    fn with_recorder<R>(&self, f: impl FnOnce(&Recorder) -> R) -> Option<R> {
+        self.recorder.lock().unwrap().as_ref().map(f)
+    }
+
     fn is_recording(&self) -> bool {
-        self.recorder.as_ref().is_some_and(|r| !r.is_done())
+        self.with_recorder(|r| !r.is_done()).unwrap_or(false)
+    }
+
+    /// Saves settings as soon as they change, so nothing is lost if SnapLapse is quit from the tray.
+    fn save_settings_if_changed(&mut self) {
+        if self.settings != self.saved_settings {
+            self.settings.save();
+            self.saved_settings = self.settings.clone();
+        }
     }
 
     fn start(&mut self) {
@@ -93,8 +116,8 @@ impl App {
             return;
         };
         self.settings.last_window = Some(window.title.clone());
-        self.settings.save();
-        self.recorder = Some(Recorder::start(Config {
+        self.save_settings_if_changed();
+        *self.recorder.lock().unwrap() = Some(Recorder::start(Config {
             window: window.id,
             title: window.title,
             folder: self.settings.folder.clone(),
@@ -225,6 +248,16 @@ impl App {
                     );
                 ui.end_row();
             }
+
+            if self.has_tray {
+                ui.label("Closing");
+                ui.checkbox(&mut self.settings.close_to_tray, "Close to tray (recording continues)")
+                    .on_hover_text(
+                        "The X button hides SnapLapse to the icon by the clock. \
+                         Right-click that icon to quit.",
+                    );
+                ui.end_row();
+            }
         });
 
         if self.settings.format == Format::Png
@@ -241,7 +274,7 @@ impl App {
 
     fn start_stop(&mut self, ui: &mut egui::Ui) {
         let recording = self.is_recording();
-        let stopping = recording && self.recorder.as_ref().is_some_and(|r| r.stop_requested());
+        let stopping = recording && self.with_recorder(|r| r.stop_requested()).unwrap_or(false);
         let (text, fill) = match (recording, stopping) {
             (true, true) => ("Finishing…", STOP_RED.gamma_multiply(0.6)),
             (true, false) => ("Stop", STOP_RED),
@@ -259,9 +292,7 @@ impl App {
         let response = ui.add_enabled(enabled, button);
         if response.clicked() {
             if recording {
-                if let Some(r) = &self.recorder {
-                    r.request_stop();
-                }
+                self.with_recorder(|r| r.request_stop());
             } else {
                 self.start();
             }
@@ -274,11 +305,10 @@ impl App {
     fn status(&self, ui: &mut egui::Ui) {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let Some(recorder) = &self.recorder else {
+            let Some(s) = self.with_recorder(|r| r.stats().snapshot()) else {
                 ui.label(RichText::new(self.idle_message()).weak());
                 return;
             };
-            let s = recorder.stats().snapshot();
             let (headline, color) = match &s.state {
                 State::Starting => ("Starting…".to_string(), None),
                 State::Running => ("Recording".to_string(), Some(BRAND_CYAN)),
@@ -340,6 +370,14 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.has_tray
+            && self.settings.close_to_tray
+            && ctx.input(|i| i.viewport().close_requested())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+        self.save_settings_if_changed();
         let recording = self.is_recording();
         if recording {
             // Refresh the counters a few times a second. When idle, nothing redraws at all.
@@ -358,11 +396,42 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        if let Some(mut recorder) = self.recorder.take() {
+        let recorder = self.recorder.lock().unwrap().take();
+        if let Some(mut recorder) = recorder {
             recorder.stop();
         }
         self.settings.save();
     }
+}
+
+/// Adds the SnapLapse icon to the Windows notification area. Returns whether it worked.
+#[cfg(windows)]
+fn install_tray(cc: &eframe::CreationContext<'_>, recorder: &SharedRecorder) -> bool {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = cc.window_handle() else {
+        return false;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return false;
+    };
+    let Ok(icon) = image::load_from_memory(TRAY_PNG) else {
+        return false;
+    };
+    let icon = icon.to_rgba8();
+    let (width, height) = icon.dimensions();
+    crate::tray::install(
+        win32.hwnd.get(),
+        recorder.clone(),
+        icon.into_raw(),
+        width,
+        height,
+    )
+    .is_ok()
+}
+
+#[cfg(not(windows))]
+fn install_tray(_cc: &eframe::CreationContext<'_>, _recorder: &SharedRecorder) -> bool {
+    false
 }
 
 fn apply_style(ctx: &egui::Context) {

@@ -9,6 +9,8 @@ mod naming;
 mod pack;
 mod recorder;
 mod settings;
+#[cfg(windows)]
+mod tray;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
