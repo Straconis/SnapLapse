@@ -5,6 +5,7 @@
 
 use x11rb::connection::Connection;
 use x11rb::protocol::composite::{ConnectionExt as _, Redirect};
+use x11rb::protocol::xfixes::ConnectionExt as _;
 use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, ImageFormat, MapState, Window};
 use x11rb::rust_connection::RustConnection;
 
@@ -100,10 +101,13 @@ pub struct X11Capturer {
     conn: RustConnection,
     atoms: Atoms,
     win: Window,
+    root: Window,
+    /// Draw the mouse pointer onto each screenshot.
+    pointer: bool,
 }
 
-pub fn open(id: WindowId) -> Result<X11Capturer, CaptureError> {
-    let (conn, _) = connect().map_err(CaptureError::Failed)?;
+pub fn open(id: WindowId, pointer: bool) -> Result<X11Capturer, CaptureError> {
+    let (conn, root) = connect().map_err(CaptureError::Failed)?;
     let atoms = Atoms::new(&conn).map_err(CaptureError::Failed)?;
     let win = u32::try_from(id.0).map_err(|_| CaptureError::Gone)?;
     conn.get_window_attributes(win)
@@ -121,7 +125,21 @@ pub fn open(id: WindowId) -> Result<X11Capturer, CaptureError> {
     if let Ok(cookie) = conn.composite_redirect_window(win, Redirect::AUTOMATIC) {
         let _ = cookie.check();
     }
-    Ok(X11Capturer { conn, atoms, win })
+    // The XFixes extension provides the pointer's image. Without it, screenshots just leave the
+    // pointer out.
+    let pointer = pointer
+        && conn
+            .xfixes_query_version(5, 0)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .is_some();
+    Ok(X11Capturer {
+        conn,
+        atoms,
+        win,
+        root,
+        pointer,
+    })
 }
 
 impl Capturer for X11Capturer {
@@ -189,15 +207,52 @@ impl Capturer for X11Capturer {
         for alpha in bgra.iter_mut().skip(3).step_by(4) {
             *alpha = 255;
         }
-        Ok(Frame {
+        let mut frame = Frame {
             width,
             height,
             bgra,
-        })
+        };
+        if self.pointer {
+            self.draw_pointer(&mut frame);
+        }
+        Ok(frame)
     }
 
     fn title(&self) -> Option<String> {
         window_title(&self.conn, &self.atoms, self.win)
+    }
+}
+
+impl X11Capturer {
+    /// Adds the mouse pointer, if it's over the window. Problems just leave it out.
+    fn draw_pointer(&self, frame: &mut Frame) {
+        let Some(image) = self
+            .conn
+            .xfixes_get_cursor_image()
+            .ok()
+            .and_then(|c| c.reply().ok())
+        else {
+            return;
+        };
+        // Where the window's top-left corner is on the screen.
+        let Some(origin) = self
+            .conn
+            .translate_coordinates(self.win, self.root, 0, 0)
+            .ok()
+            .and_then(|c| c.reply().ok())
+        else {
+            return;
+        };
+        let x = i32::from(image.x) - i32::from(image.xhot) - i32::from(origin.dst_x);
+        let y = i32::from(image.y) - i32::from(image.yhot) - i32::from(origin.dst_y);
+        super::draw_pointer(
+            frame,
+            &image.cursor_image,
+            u32::from(image.width),
+            u32::from(image.height),
+            x,
+            y,
+        );
     }
 }
 

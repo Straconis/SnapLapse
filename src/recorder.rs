@@ -25,6 +25,8 @@ pub struct Config {
     pub interval: Duration,
     pub format: Format,
     pub method: Method,
+    /// Include the mouse pointer in screenshots.
+    pub pointer: bool,
     pub output: Output,
     /// For ZIP output, the largest each ZIP part may be.
     pub zip_split: pack::ZipSplit,
@@ -143,8 +145,11 @@ pub struct Recorder {
 
 impl Recorder {
     pub fn start(config: Config) -> Recorder {
-        let (window, method) = (config.window, config.method);
-        Self::start_with(config, Box::new(move || capture::open(window, method)))
+        let (window, method, pointer) = (config.window, config.method, config.pointer);
+        Self::start_with(
+            config,
+            Box::new(move || capture::open(window, method, pointer)),
+        )
     }
 
     /// Starts with a custom way to open the capturer, so tests can use a fake window.
@@ -436,6 +441,7 @@ mod tests {
             interval: Duration::from_millis(20),
             format: Format::Png,
             method: Method::Auto,
+            pointer: false,
             output: Output::Folder,
             zip_split: pack::ZipSplit::Off,
             limit,

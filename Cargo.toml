@@ -1,6 +1,6 @@
 [package]
 name = "snaplapse"
-version = "0.9.2"
+version = "0.10.0"
 edition = "2021"
 description = "Timed screenshots of any window, even when it's covered."
 license = "MIT"
@@ -48,7 +48,7 @@ features = [
 ]
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { version = "0.13", features = ["composite"] }
+x11rb = { version = "0.13", features = ["composite", "xfixes"] }
 libc = "0.2"
 
 [dev-dependencies]

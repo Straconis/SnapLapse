@@ -26,7 +26,7 @@ pub fn run() -> Result<(), String> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("SnapLapse")
         .with_app_id("snaplapse")
-        .with_inner_size([480.0, 680.0])
+        .with_inner_size([480.0, 720.0])
         .with_min_inner_size([420.0, 360.0]);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(ICON_PNG) {
         viewport = viewport.with_icon(Arc::new(icon));
@@ -129,6 +129,7 @@ impl App {
             interval: self.settings.interval_duration(),
             format: self.settings.format,
             method: self.settings.method,
+            pointer: self.settings.include_pointer,
             output: self.settings.output,
             zip_split: self.settings.zip_split,
             limit: None,
@@ -222,6 +223,19 @@ impl App {
                         ui.selectable_value(&mut self.settings.format, f, f.label());
                     }
                 });
+            ui.end_row();
+
+            ui.label("Mouse pointer");
+            ui.horizontal(|ui| {
+                let hint = "When on, the mouse pointer appears in the screenshots whenever it's \
+                            over the captured window.";
+                toggle(ui, &mut self.settings.include_pointer).on_hover_text(hint);
+                let label =
+                    ui.add(egui::Label::new("Include in screenshots").sense(egui::Sense::click()));
+                if label.on_hover_text(hint).clicked() {
+                    self.settings.include_pointer = !self.settings.include_pointer;
+                }
+            });
             ui.end_row();
 
             ui.label("Keep as");

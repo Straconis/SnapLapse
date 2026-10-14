@@ -44,6 +44,8 @@ pub struct Settings {
     pub unit: Unit,
     pub format: Format,
     pub method: Method,
+    /// Include the mouse pointer in screenshots.
+    pub include_pointer: bool,
     pub output: Output,
     pub zip_split: ZipSplit,
     /// On Windows, the X button hides SnapLapse to the notification area instead of quitting.
@@ -65,6 +67,7 @@ impl Default for Settings {
             unit: Unit::Seconds,
             format: Format::Png,
             method: Method::Auto,
+            include_pointer: false,
             output: Output::Folder,
             zip_split: ZipSplit::Off,
             close_to_tray: true,

@@ -35,7 +35,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HDC,
 };
 use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
 use windows::Win32::System::WinRT::Direct3D11::{
@@ -47,6 +47,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetAncestor, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
     GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, MessageBoxW,
     GA_ROOT, GWL_EXSTYLE, MB_ICONERROR, WS_EX_TOOLWINDOW,
+};
+
+use windows::Win32::UI::WindowsAndMessaging::{
+    DrawIconEx, GetCursorInfo, GetIconInfo, CURSORINFO, CURSOR_SHOWING, DI_NORMAL, HICON, ICONINFO,
 };
 
 use super::{CaptureError, Capturer, Frame, Method, WindowId, WindowInfo};
@@ -134,7 +138,11 @@ fn check_window(hwnd: HWND) -> Result<(), CaptureError> {
     Ok(())
 }
 
-pub fn open(id: WindowId, method: Method) -> Result<Box<dyn Capturer>, CaptureError> {
+pub fn open(
+    id: WindowId,
+    method: Method,
+    pointer: bool,
+) -> Result<Box<dyn Capturer>, CaptureError> {
     let hwnd = hwnd(id);
     unsafe {
         if !IsWindow(hwnd).as_bool() {
@@ -142,13 +150,13 @@ pub fn open(id: WindowId, method: Method) -> Result<Box<dyn Capturer>, CaptureEr
         }
     }
     match method {
-        Method::PrintWindow => Ok(Box::new(PrintWindowCapturer { hwnd })),
-        Method::GraphicsCapture => Wgc::open(hwnd)
+        Method::PrintWindow => Ok(Box::new(PrintWindowCapturer { hwnd, pointer })),
+        Method::GraphicsCapture => Wgc::open(hwnd, pointer)
             .map(|c| Box::new(c) as Box<dyn Capturer>)
             .map_err(|e| CaptureError::Failed(format!("Windows Graphics Capture failed: {e}"))),
-        Method::Auto => match Wgc::open(hwnd) {
+        Method::Auto => match Wgc::open(hwnd, pointer) {
             Ok(c) => Ok(Box::new(c)),
-            Err(_) => Ok(Box::new(PrintWindowCapturer { hwnd })),
+            Err(_) => Ok(Box::new(PrintWindowCapturer { hwnd, pointer })),
         },
     }
 }
@@ -210,7 +218,7 @@ fn create_device() -> windows::core::Result<(ID3D11Device, ID3D11DeviceContext)>
 }
 
 impl Wgc {
-    fn open(hwnd: HWND) -> windows::core::Result<Self> {
+    fn open(hwnd: HWND, pointer: bool) -> windows::core::Result<Self> {
         unsafe {
             // Fails harmlessly if this thread is already set up.
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
@@ -229,7 +237,7 @@ impl Wgc {
         // These settings only exist on newer Windows versions. On Windows 10, the yellow border
         // can't be turned off.
         let _ = session.SetIsBorderRequired(false);
-        let _ = session.SetIsCursorCaptureEnabled(false);
+        let _ = session.SetIsCursorCaptureEnabled(pointer);
 
         let latest: Arc<Mutex<Option<SharedFrame>>> = Arc::new(Mutex::new(None));
         let sink = latest.clone();
@@ -358,12 +366,14 @@ impl Drop for Wgc {
 
 struct PrintWindowCapturer {
     hwnd: HWND,
+    /// Draw the mouse pointer onto each screenshot (PrintWindow leaves it out).
+    pointer: bool,
 }
 
 impl Capturer for PrintWindowCapturer {
     fn grab(&mut self) -> Result<Frame, CaptureError> {
         check_window(self.hwnd)?;
-        unsafe { print_window(self.hwnd) }
+        unsafe { print_window(self.hwnd, self.pointer) }
             .ok_or_else(|| CaptureError::Failed("PrintWindow couldn't capture this window".into()))
     }
 
@@ -372,7 +382,7 @@ impl Capturer for PrintWindowCapturer {
     }
 }
 
-unsafe fn print_window(hwnd: HWND) -> Option<Frame> {
+unsafe fn print_window(hwnd: HWND, pointer: bool) -> Option<Frame> {
     let mut outer = RECT::default();
     GetWindowRect(hwnd, &mut outer).ok()?;
     // The visible frame, without the invisible resize borders Windows 10 and 11 add.
@@ -407,6 +417,9 @@ unsafe fn print_window(hwnd: HWND) -> Option<Frame> {
         Ok(bitmap) => {
             let previous = SelectObject(memory, bitmap);
             let printed = PrintWindow(hwnd, memory, PW_RENDERFULLCONTENT).as_bool();
+            if printed && pointer {
+                draw_pointer(memory, &outer);
+            }
             let frame = (printed && !bits.is_null()).then(|| {
                 let all = std::slice::from_raw_parts(bits as *const u8, (w * h * 4) as usize);
                 crop(all, w, h, &outer, &visible)
@@ -420,6 +433,32 @@ unsafe fn print_window(hwnd: HWND) -> Option<Frame> {
     let _ = DeleteDC(memory);
     ReleaseDC(None, screen);
     result
+}
+
+/// Draws the mouse pointer into the window image, at its place relative to the window.
+unsafe fn draw_pointer(dc: HDC, outer: &RECT) {
+    let mut info = CURSORINFO {
+        cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+        ..Default::default()
+    };
+    if GetCursorInfo(&mut info).is_err() || info.flags.0 & CURSOR_SHOWING.0 == 0 {
+        return;
+    }
+    let icon = HICON(info.hCursor.0);
+    let mut details = ICONINFO::default();
+    if GetIconInfo(icon, &mut details).is_err() {
+        return;
+    }
+    let x = info.ptScreenPos.x - details.xHotspot as i32 - outer.left;
+    let y = info.ptScreenPos.y - details.yHotspot as i32 - outer.top;
+    let _ = DrawIconEx(dc, x, y, icon, 0, 0, 0, None, DI_NORMAL);
+    // GetIconInfo hands over copies of the pointer's bitmaps, which must be freed.
+    if !details.hbmMask.is_invalid() {
+        let _ = DeleteObject(details.hbmMask);
+    }
+    if !details.hbmColor.is_invalid() {
+        let _ = DeleteObject(details.hbmColor);
+    }
 }
 
 /// Cuts the visible part of the window out of the full image and makes every pixel opaque.

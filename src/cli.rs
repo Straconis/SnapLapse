@@ -15,7 +15,7 @@ Usage:
   snaplapse                       Open the app
   snaplapse --list                List open windows and their IDs
   snaplapse --shot ID FILE        Save one screenshot of window ID (format from FILE's extension)
-  snaplapse --record ID FOLDER [--every-ms N] [--count N] [--format png|jpg|webp] [--method auto|wgc|printwindow] [--zip [--split 100mb|500mb|1gb|2gb|4gb]]
+  snaplapse --record ID FOLDER [--every-ms N] [--count N] [--format png|jpg|webp] [--method auto|wgc|printwindow] [--pointer] [--zip [--split 100mb|500mb|1gb|2gb|4gb]]
                                   Save a screenshot every N milliseconds (default 1000) until
                                   COUNT screenshots are saved (default 10). Each recording
                                   gets its own folder in FOLDER; --zip packs it into a ZIP file
@@ -63,7 +63,7 @@ fn shot(args: &[String]) -> Result<(), String> {
         .extension()
         .and_then(|e| Format::from_extension(&e.to_string_lossy()))
         .ok_or("The file name must end in .png, .jpg or .webp")?;
-    let frame = capture::open(id, Method::Auto)
+    let frame = capture::open(id, Method::Auto, false)
         .and_then(|mut c| c.grab())
         .map_err(|e| e.to_string())?;
     encode::save(&frame, &path, format).map_err(|e| e.to_string())?;
@@ -90,11 +90,16 @@ fn record(args: &[String]) -> Result<(), String> {
     let mut format = Format::Png;
     let mut method = Method::Auto;
     let mut output = Output::Folder;
+    let mut pointer = false;
     let mut zip_split = ZipSplit::Off;
     let mut rest = options.iter();
     while let Some(option) = rest.next() {
         if option == "--zip" {
             output = Output::Zip;
+            continue;
+        }
+        if option == "--pointer" {
+            pointer = true;
             continue;
         }
         let value = rest
@@ -148,6 +153,7 @@ fn record(args: &[String]) -> Result<(), String> {
         interval: Duration::from_millis(every_ms.max(10)),
         format,
         method,
+        pointer,
         output,
         zip_split,
         limit: Some(count),
