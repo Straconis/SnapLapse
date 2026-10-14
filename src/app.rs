@@ -8,6 +8,7 @@ use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, TextStyle, Ve
 
 use crate::capture::{self, Method, WindowInfo};
 use crate::encode::Format;
+use crate::pack::ZipSplit;
 use crate::recorder::{Config, Output, Recorder, SharedRecorder, State};
 use crate::settings::{Settings, Unit, MIN_INTERVAL_MS};
 
@@ -25,8 +26,8 @@ pub fn run() -> Result<(), String> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("SnapLapse")
         .with_app_id("snaplapse")
-        .with_inner_size([480.0, 430.0])
-        .with_min_inner_size([420.0, 400.0]);
+        .with_inner_size([480.0, 640.0])
+        .with_min_inner_size([420.0, 360.0]);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(ICON_PNG) {
         viewport = viewport.with_icon(Arc::new(icon));
     }
@@ -125,6 +126,7 @@ impl App {
             format: self.settings.format,
             method: self.settings.method,
             output: self.settings.output,
+            zip_split: self.settings.zip_split,
             limit: None,
         }));
     }
@@ -233,6 +235,23 @@ impl App {
                 );
             ui.end_row();
 
+            if self.settings.output == Output::Zip {
+                ui.label("Split ZIP");
+                egui::ComboBox::from_id_salt("zip_split")
+                    .selected_text(self.settings.zip_split.label())
+                    .show_ui(ui, |ui| {
+                        for z in ZipSplit::ALL {
+                            ui.selectable_value(&mut self.settings.zip_split, z, z.label());
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Big recordings are split into several ZIP files (part 1, part 2…). \
+                         Each one opens on its own, and no picture is cut in half.",
+                    );
+                ui.end_row();
+            }
+
             if capture::HAS_METHOD_CHOICE {
                 ui.label("Capture");
                 egui::ComboBox::from_id_salt("method")
@@ -251,11 +270,15 @@ impl App {
 
             if self.has_tray {
                 ui.label("Closing");
-                ui.checkbox(&mut self.settings.close_to_tray, "Close to tray (recording continues)")
-                    .on_hover_text(
-                        "The X button hides SnapLapse to the icon by the clock. \
-                         Right-click that icon to quit.",
-                    );
+                ui.horizontal(|ui| {
+                    let hint = "When on, the X button hides SnapLapse to the icon by the clock \
+                                and recording continues. Right-click that icon to quit.";
+                    toggle(ui, &mut self.settings.close_to_tray).on_hover_text(hint);
+                    let label = ui.add(egui::Label::new("Close to tray").sense(egui::Sense::click()));
+                    if label.on_hover_text(hint).clicked() {
+                        self.settings.close_to_tray = !self.settings.close_to_tray;
+                    }
+                });
                 ui.end_row();
             }
         });
@@ -385,13 +408,18 @@ impl eframe::App for App {
         }
         let panel = egui::Frame::central_panel(&ctx.style()).inner_margin(20.0);
         egui::CentralPanel::default().frame(panel).show(ctx, |ui| {
-            self.header(ui);
-            ui.add_space(16.0);
-            ui.add_enabled_ui(!recording, |ui| self.form(ui));
-            ui.add_space(18.0);
-            self.start_stop(ui);
-            ui.add_space(12.0);
-            self.status(ui);
+            // Scrolls only if the window is made smaller than everything needs.
+            egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    self.header(ui);
+                    ui.add_space(16.0);
+                    ui.add_enabled_ui(!recording, |ui| self.form(ui));
+                    ui.add_space(18.0);
+                    self.start_stop(ui);
+                    ui.add_space(12.0);
+                    self.status(ui);
+                });
         });
     }
 
@@ -432,6 +460,38 @@ fn install_tray(cc: &eframe::CreationContext<'_>, recorder: &SharedRecorder) -> 
 #[cfg(not(windows))]
 fn install_tray(_cc: &eframe::CreationContext<'_>, _recorder: &SharedRecorder) -> bool {
     false
+}
+
+/// An on/off switch, which reads more clearly than a checkbox for settings like this.
+/// Adapted from egui's own toggle-switch example.
+fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
+    let size = Vec2::new(40.0, 22.0);
+    let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, "")
+    });
+    if ui.is_rect_visible(rect) {
+        let how_on = ui.ctx().animate_bool_responsive(response.id, *on);
+        let visuals = ui.style().interact_selectable(&response, *on);
+        let fill = if *on { BRAND } else { visuals.bg_fill };
+        let radius = 0.5 * rect.height();
+        ui.painter().rect(
+            rect,
+            radius,
+            fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), how_on);
+        let knob = egui::pos2(x, rect.center().y);
+        ui.painter()
+            .circle(knob, 0.75 * radius, Color32::WHITE, egui::Stroke::NONE);
+    }
+    response
 }
 
 fn apply_style(ctx: &egui::Context) {

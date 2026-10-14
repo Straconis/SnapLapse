@@ -26,6 +26,8 @@ pub struct Config {
     pub format: Format,
     pub method: Method,
     pub output: Output,
+    /// For ZIP output, the largest each ZIP part may be.
+    pub zip_split: pack::ZipSplit,
     /// Stop after this many screenshots. `None` means record until stopped.
     pub limit: Option<u64>,
 }
@@ -298,7 +300,7 @@ fn record(config: Config, open: Opener, stop: &AtomicBool, stats: &Arc<Stats>) {
     for worker in worker_threads {
         let _ = worker.join();
     }
-    if let Some(problem) = finish_recording(&dir, config.output, stats) {
+    if let Some(problem) = finish_recording(&dir, &config, stats) {
         if final_state == State::Stopped {
             final_state = State::Ended(problem);
         }
@@ -308,20 +310,26 @@ fn record(config: Config, open: Opener, stop: &AtomicBool, stats: &Arc<Stats>) {
 
 /// Tidies up after the last screenshot is saved: removes the folder if nothing was saved, or packs
 /// it into a ZIP file. Returns a message if packing failed. The pictures stay in the folder then.
-fn finish_recording(dir: &Path, output: Output, stats: &Stats) -> Option<String> {
+fn finish_recording(dir: &Path, config: &Config, stats: &Stats) -> Option<String> {
     if stats.saved.load(Ordering::Relaxed) == 0 {
         // Only removes the folder if it's empty.
         let _ = std::fs::remove_dir(dir);
         *stats.destination.lock().unwrap() = None;
         return None;
     }
-    if output != Output::Zip {
+    if config.output != Output::Zip {
         return None;
     }
     stats.set_state(State::Packing);
-    match pack::zip_folder(dir) {
-        Ok(zip) => {
-            stats.set_destination(&zip);
+    match pack::zip_folder(dir, config.zip_split.max_bytes()) {
+        Ok(parts) => {
+            if let [only] = parts.as_slice() {
+                stats.set_destination(only);
+            } else {
+                let name = dir.file_name().unwrap_or_default().to_string_lossy();
+                *stats.destination.lock().unwrap() =
+                    Some(format!("{name} ({} ZIP parts)", parts.len()));
+            }
             None
         }
         Err(e) => Some(format!(
@@ -429,6 +437,7 @@ mod tests {
             format: Format::Png,
             method: Method::Auto,
             output: Output::Folder,
+            zip_split: pack::ZipSplit::Off,
             limit,
         }
     }

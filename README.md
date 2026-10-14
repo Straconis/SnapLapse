@@ -20,7 +20,7 @@ Windows may show a SmartScreen warning because the app isn't code-signed yet. Ch
 3. Set how often to take one, in seconds or milliseconds.
 4. Press **Start**. Press **Stop** when you're done.
 
-Each recording gets its own folder, named with its start time and window, such as `2026-10-14 19-30-05 - Foundry VTT`, and numbering starts at 1 inside it. Set **Keep as** to **A ZIP file per recording** to have that folder packed into a single ZIP file when you press Stop. Your choices are remembered for next time.
+Each recording gets its own folder, named with its start time and window, such as `2026-10-14 19-30-05 - Foundry VTT`, and numbering starts at 1 inside it. Set **Keep as** to **A ZIP file per recording** to have that folder packed into a ZIP file when you press Stop. For long recordings, **Split ZIP** can break it into parts of 100 MB to 4 GB (`… - part 1.zip`, `… - part 2.zip`). Each part opens on its own, and no picture is ever cut in half. Your choices are remembered for next time.
 
 ## Features
 

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::Method;
 use crate::encode::Format;
+use crate::pack::ZipSplit;
 use crate::recorder::Output;
 
 pub const MIN_INTERVAL_MS: f64 = 10.0;
@@ -44,6 +45,7 @@ pub struct Settings {
     pub format: Format,
     pub method: Method,
     pub output: Output,
+    pub zip_split: ZipSplit,
     /// On Windows, the X button hides SnapLapse to the notification area instead of quitting.
     pub close_to_tray: bool,
     /// Title of the last window recorded, used to preselect it next time.
@@ -62,6 +64,7 @@ impl Default for Settings {
             format: Format::Png,
             method: Method::Auto,
             output: Output::Folder,
+            zip_split: ZipSplit::Off,
             close_to_tray: true,
             last_window: None,
         }

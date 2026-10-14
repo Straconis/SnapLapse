@@ -56,7 +56,10 @@ pub fn unique_recording_dir(base: &Path, name: &str) -> PathBuf {
             }
         })
         .find(|candidate| {
-            !base.join(candidate).exists() && !base.join(format!("{candidate}.zip")).exists()
+            !base.join(candidate).exists()
+                && !base.join(format!("{candidate}.zip")).exists()
+                && !base.join(format!("{candidate} - part 1.zip")).exists()
+                && !base.join(format!("{candidate} - part 01.zip")).exists()
         })
         .map(|candidate| base.join(candidate))
         .expect("there is always a free name")

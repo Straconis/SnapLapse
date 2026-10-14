@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::capture::{self, Method, WindowId};
 use crate::encode::{self, Format};
+use crate::pack::ZipSplit;
 use crate::recorder::{Config, Output, Recorder, State};
 
 const USAGE: &str = "\
@@ -14,7 +15,7 @@ Usage:
   snaplapse                       Open the app
   snaplapse --list                List open windows and their IDs
   snaplapse --shot ID FILE        Save one screenshot of window ID (format from FILE's extension)
-  snaplapse --record ID FOLDER [--every-ms N] [--count N] [--format png|jpg|webp] [--method auto|wgc|printwindow] [--zip]
+  snaplapse --record ID FOLDER [--every-ms N] [--count N] [--format png|jpg|webp] [--method auto|wgc|printwindow] [--zip [--split 100mb|500mb|1gb|2gb|4gb]]
                                   Save a screenshot every N milliseconds (default 1000) until
                                   COUNT screenshots are saved (default 10). Each recording
                                   gets its own folder in FOLDER; --zip packs it into a ZIP file
@@ -89,6 +90,7 @@ fn record(args: &[String]) -> Result<(), String> {
     let mut format = Format::Png;
     let mut method = Method::Auto;
     let mut output = Output::Folder;
+    let mut zip_split = ZipSplit::Off;
     let mut rest = options.iter();
     while let Some(option) = rest.next() {
         if option == "--zip" {
@@ -111,6 +113,16 @@ fn record(args: &[String]) -> Result<(), String> {
             }
             "--format" => {
                 format = Format::from_extension(value).ok_or("--format must be png, jpg or webp")?
+            }
+            "--split" => {
+                zip_split = match value.to_ascii_lowercase().as_str() {
+                    "100mb" => ZipSplit::Mb100,
+                    "500mb" => ZipSplit::Mb500,
+                    "1gb" => ZipSplit::Gb1,
+                    "2gb" => ZipSplit::Gb2,
+                    "4gb" => ZipSplit::Gb4,
+                    _ => return Err("--split must be 100mb, 500mb, 1gb, 2gb or 4gb".into()),
+                }
             }
             "--method" => {
                 method = match value.as_str() {
@@ -137,6 +149,7 @@ fn record(args: &[String]) -> Result<(), String> {
         format,
         method,
         output,
+        zip_split,
         limit: Some(count),
     });
     while !recorder.is_done() {
