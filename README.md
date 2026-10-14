@@ -4,14 +4,30 @@
 
 **SnapLapse** saves a screenshot of one window on a timer, every few seconds or milliseconds, until you press Stop. It works even when other windows are on top of the one you're capturing.
 
-> **Status:** early development. There's nothing to download yet.
+## Download
+
+Get the latest version from the [Releases page](https://github.com/Straconis/SnapLapse/releases/latest):
+
+- **Windows 10 / 11:** `SnapLapse-<version>-setup.exe` installs SnapLapse with a Start menu shortcut and an uninstaller. Or download `SnapLapse.exe` and run it directly, with no install.
+- **Linux:** download `snaplapse-linux-x86_64`, make it executable (`chmod +x snaplapse-linux-x86_64`), and run it.
+
+Windows may show a SmartScreen warning because the app isn't code-signed yet. Choose **More info → Run anyway**.
+
+## How to use it
+
+1. Choose the window to capture, such as your VTT's browser window.
+2. Choose a folder for the screenshots.
+3. Set how often to take one, in seconds or milliseconds.
+4. Press **Start**. Press **Stop** when you're done.
+
+Your choices are remembered for next time. If the folder already has screenshots, numbering continues where it left off, so nothing is overwritten.
 
 ## Features
 
 - **Captures a covered window.** Pick a window and SnapLapse keeps capturing it while other windows cover it. A minimized window can't be captured.
 - **Set the interval in seconds or milliseconds.**
 - **Choose the image format:** PNG, JPG or WebP.
-- **Sortable file names:** files are numbered in order, like `0001 - Foundry VTT.png`.
+- **Sortable file names:** files are numbered in order, like `000001 - Foundry VTT.png`.
 - **Stays out of your way.** It never steals focus or moves windows, and it does no work between shots.
 - **One small file to run.** There's nothing else to install.
 
@@ -22,7 +38,18 @@
 | Windows 11 | Captures with no visible border. |
 | Windows 10 | Windows draws a thin yellow border around the window being captured. |
 | Linux (X11) | Captures silently. |
-| Linux (Wayland) | GNOME and KDE ask you to choose the window once, then SnapLapse remembers your choice. |
+| Linux (Wayland) | Apps running through XWayland work now. Native Wayland apps are coming in a later version. |
+
+## Building from source
+
+Everything builds inside a Podman container, so the only thing you need is Podman:
+
+```bash
+./build.sh          # Linux and Windows versions plus the Windows installer, into dist/
+./build.sh test     # automated tests and code checks
+```
+
+There's also a command-line mode for scripting: run `snaplapse --help`.
 
 ## License
 

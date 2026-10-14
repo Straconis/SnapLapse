@@ -1,0 +1,6 @@
+# Build environment for SnapLapse: Rust plus the MinGW toolchain for Windows .exe files.
+FROM docker.io/library/rust:1-bookworm
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 pkg-config libwayland-dev libxkbcommon-dev nsis \
+ && rm -rf /var/lib/apt/lists/*
+RUN rustup target add x86_64-pc-windows-gnu && rustup component add clippy rustfmt

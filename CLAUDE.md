@@ -6,7 +6,7 @@ Takes a screenshot of one chosen window every N seconds or milliseconds and save
 
 - **Capture a covered window.** It must work when other windows are on top. A minimized window can't be captured, so the app should say that clearly.
 - **Controls:** pick a window, a save folder, an interval in seconds or milliseconds, an image format (PNG by default, also JPG and WebP), and Start and Stop buttons.
-- **File names:** `<zero-padded number> - <window title>.<ext>`, for example `0001 - Foundry VTT.png`. Remove characters that filenames can't contain. Track the window itself, not its title, because browser titles change when you switch tabs.
+- **File names:** `<zero-padded number> - <window title>.<ext>`, for example `000001 - Foundry VTT.png`. Remove characters that filenames can't contain. Track the window itself, not its title, because browser titles change when you switch tabs.
 - **Very light and fast. It must never interfere with the user.** Don't steal focus or move or raise windows. Do no work between shots. Encode and save images on a low-priority background thread. No popups or sounds while running.
 - **Platforms:** Windows 10, Windows 11 and Linux. Development happens on Debian 13 with GNOME (an X11 session today, but Wayland must be supported too).
 
