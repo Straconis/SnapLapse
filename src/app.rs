@@ -8,7 +8,7 @@ use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, TextStyle, Ve
 
 use crate::capture::{self, Method, WindowInfo};
 use crate::encode::Format;
-use crate::recorder::{Config, Recorder, State};
+use crate::recorder::{Config, Output, Recorder, State};
 use crate::settings::{Settings, Unit, MIN_INTERVAL_MS};
 
 const BRAND: Color32 = Color32::from_rgb(0x3B, 0x82, 0xF6);
@@ -101,6 +101,7 @@ impl App {
             interval: self.settings.interval_duration(),
             format: self.settings.format,
             method: self.settings.method,
+            output: self.settings.output,
             limit: None,
         }));
     }
@@ -194,6 +195,21 @@ impl App {
                 });
             ui.end_row();
 
+            ui.label("Keep as");
+            egui::ComboBox::from_id_salt("output")
+                .selected_text(self.settings.output.label())
+                .show_ui(ui, |ui| {
+                    for o in Output::ALL {
+                        ui.selectable_value(&mut self.settings.output, o, o.label());
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Each recording gets its own folder, named with its start time and window. \
+                     ZIP packs that folder into a single file when you press Stop.",
+                );
+            ui.end_row();
+
             if capture::HAS_METHOD_CHOICE {
                 ui.label("Capture");
                 egui::ComboBox::from_id_salt("method")
@@ -270,6 +286,7 @@ impl App {
                     "Paused: the window is minimized. Restore it to continue.".to_string(),
                     Some(WARN),
                 ),
+                State::Packing => ("Packing into a ZIP file…".to_string(), Some(BRAND_CYAN)),
                 State::Stopped => ("Stopped".to_string(), None),
                 State::Ended(reason) => (format!("Stopped: {reason}"), Some(STOP_RED)),
             };
@@ -279,6 +296,11 @@ impl App {
             }
             ui.label(headline);
             ui.label(format!("{} saved", s.saved));
+            if let Some(destination) = &s.destination {
+                ui.add(
+                    egui::Label::new(RichText::new(format!("In: {destination}")).weak()).truncate(),
+                );
+            }
             if let Some(file) = &s.last_file {
                 ui.add(egui::Label::new(RichText::new(format!("Last: {file}")).weak()).truncate());
             }

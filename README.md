@@ -8,7 +8,7 @@
 
 Get the latest version from the [Releases page](https://github.com/Straconis/SnapLapse/releases/latest):
 
-- **Windows 10 / 11:** `SnapLapse-<version>-setup.exe` installs SnapLapse with a Start menu shortcut and an uninstaller. Or download `SnapLapse.exe` and run it directly, with no install.
+- **Windows 10 / 11:** `SnapLapse-<version>-setup.exe` installs SnapLapse into `Program Files\SnapLapse`, with a SnapLapse folder in the Start menu and an uninstaller. Or download `SnapLapse.exe` and run it directly, with no install.
 - **Linux:** download `snaplapse-linux-x86_64`, make it executable (`chmod +x snaplapse-linux-x86_64`), and run it.
 
 Windows may show a SmartScreen warning because the app isn't code-signed yet. Choose **More info → Run anyway**.
@@ -20,13 +20,14 @@ Windows may show a SmartScreen warning because the app isn't code-signed yet. Ch
 3. Set how often to take one, in seconds or milliseconds.
 4. Press **Start**. Press **Stop** when you're done.
 
-Your choices are remembered for next time. If the folder already has screenshots, numbering continues where it left off, so nothing is overwritten.
+Each recording gets its own folder, named with its start time and window, such as `2026-10-14 19-30-05 - Foundry VTT`, and numbering starts at 1 inside it. Set **Keep as** to **A ZIP file per recording** to have that folder packed into a single ZIP file when you press Stop. Your choices are remembered for next time.
 
 ## Features
 
 - **Captures a covered window.** Pick a window and SnapLapse keeps capturing it while other windows cover it. A minimized window can't be captured.
 - **Set the interval in seconds or milliseconds.**
 - **Choose the image format:** PNG, JPG or WebP.
+- **Recordings never mix:** each one gets its own folder, or its own ZIP file, named with its start time.
 - **Sortable file names:** files are numbered in order, like `000001 - Foundry VTT.png`.
 - **Stays out of your way.** It never steals focus or moves windows, and it does no work between shots.
 - **One small file to run.** There's nothing else to install.

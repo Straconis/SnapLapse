@@ -1,6 +1,7 @@
 ; SnapLapse Windows installer, built with NSIS (makensis) by build.sh.
-; Installs SnapLapse.exe and Uninstall.exe side by side, adds a Start menu shortcut (and,
-; optionally, a desktop shortcut), and registers SnapLapse in Windows' Installed apps list.
+; Installs SnapLapse.exe and Uninstall.exe side by side in Program Files\SnapLapse, adds a
+; SnapLapse folder to the Start menu with shortcuts to both (and, optionally, a desktop shortcut),
+; and registers SnapLapse in Windows' Installed apps list.
 ; Screenshots and the user's settings are never touched by the uninstaller.
 
 Unicode true
@@ -70,7 +71,11 @@ Section "SnapLapse" SecApp
   SetOutPath "$INSTDIR"
   File "..\dist\SnapLapse.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$SMPROGRAMS\${APP}.lnk" "$INSTDIR\SnapLapse.exe"
+  ; Version 0.5.0 put a loose shortcut in the Start menu. Replace it with a folder.
+  Delete "$SMPROGRAMS\${APP}.lnk"
+  CreateDirectory "$SMPROGRAMS\${APP}"
+  CreateShortcut "$SMPROGRAMS\${APP}\${APP}.lnk" "$INSTDIR\SnapLapse.exe"
+  CreateShortcut "$SMPROGRAMS\${APP}\Uninstall ${APP}.lnk" "$INSTDIR\Uninstall.exe"
 
   WriteRegStr HKLM "Software\${APP}" "InstallDir" "$INSTDIR"
   WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "${APP}"
@@ -95,6 +100,9 @@ Section "Uninstall"
   Delete "$INSTDIR\SnapLapse.exe"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
+  Delete "$SMPROGRAMS\${APP}\${APP}.lnk"
+  Delete "$SMPROGRAMS\${APP}\Uninstall ${APP}.lnk"
+  RMDir "$SMPROGRAMS\${APP}"
   Delete "$SMPROGRAMS\${APP}.lnk"
   Delete "$DESKTOP\${APP}.lnk"
   DeleteRegKey HKLM "${UNINST_KEY}"

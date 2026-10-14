@@ -1,6 +1,6 @@
 //! Screenshot file names, such as `000001 - Foundry VTT.png`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::encode::Format;
 
@@ -39,20 +39,31 @@ pub fn file_name(number: u64, title: &str, format: Format) -> String {
     )
 }
 
-/// The number for the next screenshot in `dir`, one after the highest already there, so a new
-/// recording never overwrites an earlier one.
-pub fn next_number(dir: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 1;
-    };
-    entries
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| leading_number(&entry.file_name().to_string_lossy()))
-        .max()
-        .map_or(1, |n| n.saturating_add(1))
+/// The folder name for one recording, such as `2026-10-14 19-30-05 - Foundry VTT`.
+pub fn recording_name(started: &str, title: &str) -> String {
+    format!("{started} - {}", sanitize_title(title))
+}
+
+/// A path in `base` for a new recording that isn't already taken by a folder or ZIP file. If two
+/// recordings start in the same second, the second gets ` (2)` added, and so on.
+pub fn unique_recording_dir(base: &Path, name: &str) -> PathBuf {
+    (1u32..)
+        .map(|n| {
+            if n == 1 {
+                name.to_string()
+            } else {
+                format!("{name} ({n})")
+            }
+        })
+        .find(|candidate| {
+            !base.join(candidate).exists() && !base.join(format!("{candidate}.zip")).exists()
+        })
+        .map(|candidate| base.join(candidate))
+        .expect("there is always a free name")
 }
 
 /// Reads the number from a name shaped like `000042 - anything`.
+#[cfg(test)]
 fn leading_number(name: &str) -> Option<u64> {
     let (digits, _) = name.split_once(" - ")?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -106,24 +117,29 @@ mod tests {
     }
 
     #[test]
-    fn numbering_continues_after_existing_files() {
-        let dir = crate::test_dir("numbering");
-        assert_eq!(next_number(&dir), 1);
-        for name in [
-            "00003 - a.png",
-            "00010 - b.jpg",
-            "notes.txt",
-            "99 bottles.png",
-            "- x.png",
-        ] {
-            std::fs::write(dir.join(name), b"").unwrap();
-        }
-        assert_eq!(next_number(&dir), 11);
+    fn recording_folders_are_named_by_start_time_and_window() {
+        assert_eq!(
+            recording_name("2026-10-14 19-30-05", "Foundry VTT: Session 3"),
+            "2026-10-14 19-30-05 - Foundry VTT Session 3"
+        );
     }
 
     #[test]
-    fn missing_folder_starts_at_one() {
-        assert_eq!(next_number(Path::new("/definitely/not/a/real/folder")), 1);
+    fn recordings_started_in_the_same_second_get_different_folders() {
+        let base = crate::test_dir("unique-dirs");
+        let name = "2026-10-14 19-30-05 - VTT";
+        assert_eq!(unique_recording_dir(&base, name), base.join(name));
+        std::fs::create_dir(base.join(name)).unwrap();
+        assert_eq!(
+            unique_recording_dir(&base, name),
+            base.join(format!("{name} (2)"))
+        );
+        // A packed ZIP counts as taken too.
+        std::fs::write(base.join(format!("{name} (2).zip")), b"").unwrap();
+        assert_eq!(
+            unique_recording_dir(&base, name),
+            base.join(format!("{name} (3)"))
+        );
     }
 
     // Property tests: proptest generates thousands of random inputs, including strange Unicode,

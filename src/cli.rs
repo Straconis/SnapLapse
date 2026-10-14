@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::capture::{self, Method, WindowId};
 use crate::encode::{self, Format};
-use crate::recorder::{Config, Recorder, State};
+use crate::recorder::{Config, Output, Recorder, State};
 
 const USAGE: &str = "\
 SnapLapse: timed screenshots of any window, even when it's covered.
@@ -14,9 +14,10 @@ Usage:
   snaplapse                       Open the app
   snaplapse --list                List open windows and their IDs
   snaplapse --shot ID FILE        Save one screenshot of window ID (format from FILE's extension)
-  snaplapse --record ID FOLDER [--every-ms N] [--count N] [--format png|jpg|webp] [--method auto|wgc|printwindow]
+  snaplapse --record ID FOLDER [--every-ms N] [--count N] [--format png|jpg|webp] [--method auto|wgc|printwindow] [--zip]
                                   Save a screenshot every N milliseconds (default 1000) until
-                                  COUNT screenshots are saved (default 10)
+                                  COUNT screenshots are saved (default 10). Each recording
+                                  gets its own folder in FOLDER; --zip packs it into a ZIP file
   snaplapse --help | --version
 ";
 
@@ -87,8 +88,13 @@ fn record(args: &[String]) -> Result<(), String> {
     let mut count = 10u64;
     let mut format = Format::Png;
     let mut method = Method::Auto;
+    let mut output = Output::Folder;
     let mut rest = options.iter();
     while let Some(option) = rest.next() {
+        if option == "--zip" {
+            output = Output::Zip;
+            continue;
+        }
         let value = rest
             .next()
             .ok_or_else(|| format!("{option} needs a value"))?;
@@ -130,6 +136,7 @@ fn record(args: &[String]) -> Result<(), String> {
         interval: Duration::from_millis(every_ms.max(10)),
         format,
         method,
+        output,
         limit: Some(count),
     });
     while !recorder.is_done() {
@@ -137,10 +144,14 @@ fn record(args: &[String]) -> Result<(), String> {
     }
     recorder.stop();
     let s = recorder.stats().snapshot();
+    let destination = s
+        .destination
+        .as_deref()
+        .map_or(folder.clone(), |d| folder.join(d));
     println!(
         "Saved {} screenshots to {} in {:.1}s ({} skipped, {} failed)",
         s.saved,
-        folder.display(),
+        destination.display(),
         started.elapsed().as_secs_f64(),
         s.skipped,
         s.failed

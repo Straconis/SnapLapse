@@ -6,6 +6,7 @@ mod capture;
 mod cli;
 mod encode;
 mod naming;
+mod pack;
 mod recorder;
 mod settings;
 

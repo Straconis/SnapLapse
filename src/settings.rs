@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::Method;
 use crate::encode::Format;
+use crate::recorder::Output;
 
 pub const MIN_INTERVAL_MS: f64 = 10.0;
 pub const MAX_INTERVAL_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
@@ -42,6 +43,7 @@ pub struct Settings {
     pub unit: Unit,
     pub format: Format,
     pub method: Method,
+    pub output: Output,
     /// Title of the last window recorded, used to preselect it next time.
     pub last_window: Option<String>,
 }
@@ -57,6 +59,7 @@ impl Default for Settings {
             unit: Unit::Seconds,
             format: Format::Png,
             method: Method::Auto,
+            output: Output::Folder,
             last_window: None,
         }
     }
