@@ -48,6 +48,8 @@ pub struct Settings {
     pub zip_split: ZipSplit,
     /// On Windows, the X button hides SnapLapse to the notification area instead of quitting.
     pub close_to_tray: bool,
+    /// On Windows, a window dropped against a screen edge hides itself when the mouse leaves.
+    pub edge_autohide: bool,
     /// Title of the last window recorded, used to preselect it next time.
     pub last_window: Option<String>,
 }
@@ -66,6 +68,7 @@ impl Default for Settings {
             output: Output::Folder,
             zip_split: ZipSplit::Off,
             close_to_tray: true,
+            edge_autohide: false,
             last_window: None,
         }
     }

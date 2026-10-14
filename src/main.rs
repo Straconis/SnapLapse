@@ -4,6 +4,11 @@
 mod app;
 mod capture;
 mod cli;
+// The docking rules are only used on Windows, but they are tested everywhere.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod dock;
+#[cfg(windows)]
+mod dock_windows;
 mod encode;
 mod naming;
 mod pack;

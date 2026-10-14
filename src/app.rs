@@ -1,6 +1,7 @@
 //! The SnapLapse window.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +27,7 @@ pub fn run() -> Result<(), String> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("SnapLapse")
         .with_app_id("snaplapse")
-        .with_inner_size([480.0, 640.0])
+        .with_inner_size([480.0, 680.0])
         .with_min_inner_size([420.0, 360.0]);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(ICON_PNG) {
         viewport = viewport.with_icon(Arc::new(icon));
@@ -54,6 +55,8 @@ struct App {
     logo: Option<egui::TextureHandle>,
     /// Whether the tray icon exists, so closing to the tray can't hide the window for good.
     has_tray: bool,
+    /// Mirrors the "Auto-hide at screen edge" toggle for the docking thread (Windows only).
+    docking: Option<Arc<AtomicBool>>,
 }
 
 impl App {
@@ -62,6 +65,7 @@ impl App {
         let settings = Settings::load();
         let recorder = SharedRecorder::default();
         let has_tray = install_tray(cc, &recorder);
+        let docking = start_docking(cc, settings.edge_autohide);
         let mut app = App {
             saved_settings: settings.clone(),
             settings,
@@ -71,6 +75,7 @@ impl App {
             recorder,
             logo: load_logo(&cc.egui_ctx),
             has_tray,
+            docking,
         };
         app.refresh_windows();
         if let Some(last) = &app.settings.last_window {
@@ -281,6 +286,22 @@ impl App {
                 });
                 ui.end_row();
             }
+
+            if self.docking.is_some() {
+                ui.label("Screen edge");
+                ui.horizontal(|ui| {
+                    let hint = "When on, drag SnapLapse against an edge of the screen to dock it. \
+                                It hides when the mouse leaves and leaves a small red marker on \
+                                the edge; point at the marker to bring it back.";
+                    toggle(ui, &mut self.settings.edge_autohide).on_hover_text(hint);
+                    let label =
+                        ui.add(egui::Label::new("Auto-hide when docked").sense(egui::Sense::click()));
+                    if label.on_hover_text(hint).clicked() {
+                        self.settings.edge_autohide = !self.settings.edge_autohide;
+                    }
+                });
+                ui.end_row();
+            }
         });
 
         if self.settings.format == Format::Png
@@ -401,6 +422,9 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
         self.save_settings_if_changed();
+        if let Some(docking) = &self.docking {
+            docking.store(self.settings.edge_autohide, Ordering::Relaxed);
+        }
         let recording = self.is_recording();
         if recording {
             // Refresh the counters a few times a second. When idle, nothing redraws at all.
@@ -432,14 +456,20 @@ impl eframe::App for App {
     }
 }
 
+/// SnapLapse's own window handle on Windows, for the tray icon and edge docking.
+#[cfg(windows)]
+fn main_window(cc: &eframe::CreationContext<'_>) -> Option<isize> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match cc.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(win32) => Some(win32.hwnd.get()),
+        _ => None,
+    }
+}
+
 /// Adds the SnapLapse icon to the Windows notification area. Returns whether it worked.
 #[cfg(windows)]
 fn install_tray(cc: &eframe::CreationContext<'_>, recorder: &SharedRecorder) -> bool {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let Ok(handle) = cc.window_handle() else {
-        return false;
-    };
-    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+    let Some(hwnd) = main_window(cc) else {
         return false;
     };
     let Ok(icon) = image::load_from_memory(TRAY_PNG) else {
@@ -447,19 +477,26 @@ fn install_tray(cc: &eframe::CreationContext<'_>, recorder: &SharedRecorder) -> 
     };
     let icon = icon.to_rgba8();
     let (width, height) = icon.dimensions();
-    crate::tray::install(
-        win32.hwnd.get(),
-        recorder.clone(),
-        icon.into_raw(),
-        width,
-        height,
-    )
-    .is_ok()
+    crate::tray::install(hwnd, recorder.clone(), icon.into_raw(), width, height).is_ok()
 }
 
 #[cfg(not(windows))]
 fn install_tray(_cc: &eframe::CreationContext<'_>, _recorder: &SharedRecorder) -> bool {
     false
+}
+
+/// Starts edge docking on Windows. Returns the switch that mirrors the app's toggle.
+#[cfg(windows)]
+fn start_docking(cc: &eframe::CreationContext<'_>, on: bool) -> Option<Arc<AtomicBool>> {
+    let hwnd = main_window(cc)?;
+    let enabled = Arc::new(AtomicBool::new(on));
+    crate::dock_windows::start(hwnd, enabled.clone());
+    Some(enabled)
+}
+
+#[cfg(not(windows))]
+fn start_docking(_cc: &eframe::CreationContext<'_>, _on: bool) -> Option<Arc<AtomicBool>> {
+    None
 }
 
 /// An on/off switch, which reads more clearly than a checkbox for settings like this.

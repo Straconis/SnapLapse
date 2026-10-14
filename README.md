@@ -30,6 +30,7 @@ Each recording gets its own folder, named with its start time and window, such a
 - **Recordings never mix:** each one gets its own folder, or its own ZIP file, named with its start time.
 - **Sortable file names:** files are numbered in order, like `000001 - Foundry VTT.png`.
 - **Close to tray (Windows).** Clicking X hides SnapLapse to an icon by the clock and recording carries on. Click the icon to bring it back, or right-click it to stop recording or quit. You can turn this off in the app.
+- **Auto-hide at a screen edge (Windows).** Turn on **Auto-hide when docked**, then drag SnapLapse against an edge of the screen. It hides when your mouse leaves and leaves a small red marker on that edge. Point at the marker to bring it back. Drag it away from the edge to undock.
 - **Stays out of your way.** It never steals focus or moves windows, and it does no work between shots.
 - **One small file to run.** There's nothing else to install.
 
