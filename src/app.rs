@@ -20,6 +20,10 @@ const WARN: Color32 = Color32::from_rgb(0xF5, 0x9E, 0x0B);
 
 const ICON_PNG: &[u8] = include_bytes!("../branding/out/icons/snaplapse-256.png");
 const LOGO_PNG: &[u8] = include_bytes!("../branding/out/icons/snaplapse-128.png");
+const MAKER_PNG: &[u8] = include_bytes!("../branding/out/straconis-software-wordmark.png");
+/// Height over width of the wordmark picture (256×84).
+const MAKER_ASPECT: f32 = 84.0 / 256.0;
+const MAKER_URL: &str = "https://straconis.dev";
 #[cfg(windows)]
 const TRAY_PNG: &[u8] = include_bytes!("../branding/out/icons/snaplapse-32.png");
 
@@ -53,6 +57,7 @@ struct App {
     list_error: Option<String>,
     recorder: SharedRecorder,
     logo: Option<egui::TextureHandle>,
+    maker: Option<egui::TextureHandle>,
     /// Whether the tray icon exists, so closing to the tray can't hide the window for good.
     has_tray: bool,
     /// Whether edge docking is available (Windows only).
@@ -78,6 +83,7 @@ impl App {
             list_error: None,
             recorder,
             logo: load_logo(&cc.egui_ctx),
+            maker: load_texture(&cc.egui_ctx, "maker", MAKER_PNG),
             has_tray,
             docking,
             cleanup: None,
@@ -205,7 +211,8 @@ impl App {
                     open_folder(&self.settings.folder);
                 }
                 if ui.button("Browse…").clicked() {
-                    if let Some(folder) = rfd::FileDialog::new().set_directory(&self.settings.folder).pick_folder() {
+                    let start = &self.settings.folder;
+                    if let Some(folder) = crate::dialog::run(|| rfd::FileDialog::new().set_directory(start).pick_folder()) {
                         self.settings.folder = folder;
                     }
                 }
@@ -548,6 +555,12 @@ impl eframe::App for App {
                     self.start_stop(ui);
                     ui.add_space(12.0);
                     self.status(ui);
+                    if let Some(maker) = &self.maker {
+                        ui.add_space(14.0);
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                            maker_mark(ui, maker)
+                        });
+                    }
                 });
         });
         if !recording {
@@ -658,10 +671,34 @@ fn apply_style(ctx: &egui::Context) {
 }
 
 fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let image = image::load_from_memory(LOGO_PNG).ok()?.to_rgba8();
+    load_texture(ctx, "logo", LOGO_PNG)
+}
+
+fn load_texture(ctx: &egui::Context, name: &str, png: &[u8]) -> Option<egui::TextureHandle> {
+    let image = image::load_from_memory(png).ok()?.to_rgba8();
     let size = [image.width() as usize, image.height() as usize];
     let pixels = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
-    Some(ctx.load_texture("logo", pixels, egui::TextureOptions::LINEAR))
+    Some(ctx.load_texture(name, pixels, egui::TextureOptions::LINEAR))
+}
+/// The maker's mark: the Straconis Software wordmark, kept small, linking to the website.
+fn maker_mark(ui: &mut egui::Ui, texture: &egui::TextureHandle) {
+    let width = 120.0;
+    let size = Vec2::new(width, width * MAKER_ASPECT);
+    let response = ui
+        .add(egui::Image::new((texture.id(), size)).sense(egui::Sense::click()))
+        .on_hover_text(format!("Made by Straconis Software. Visit {MAKER_URL}"))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.clicked() {
+        open_url(MAKER_URL);
+    }
+}
+
+fn open_url(url: &str) {
+    #[cfg(windows)]
+    let opener = "explorer";
+    #[cfg(not(windows))]
+    let opener = "xdg-open";
+    launch(std::process::Command::new(opener).arg(url));
 }
 
 fn plural(count: usize) -> &'static str {
@@ -688,5 +725,13 @@ fn open_folder(folder: &Path) {
     let opener = "explorer";
     #[cfg(not(windows))]
     let opener = "xdg-open";
-    let _ = std::process::Command::new(opener).arg(folder).spawn();
+    launch(std::process::Command::new(opener).arg(folder));
+}
+
+/// Starts a helper program such as the file manager, and collects it when it exits so it
+/// doesn't linger as a finished process while SnapLapse runs.
+fn launch(command: &mut std::process::Command) {
+    if let Ok(mut child) = command.spawn() {
+        std::thread::spawn(move || child.wait());
+    }
 }

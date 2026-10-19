@@ -1,6 +1,6 @@
 [package]
 name = "snaplapse"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 description = "Timed screenshots of any window, even when it's covered."
 license = "MIT"
@@ -50,6 +50,8 @@ features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", features = ["composite", "xfixes"] }
 libc = "0.2"
+# File pickers on Linux need a Tokio runtime to talk to the desktop (see src/dialog.rs).
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 proptest = "1"
