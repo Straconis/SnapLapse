@@ -7,6 +7,7 @@ use std::time::Duration;
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, TextStyle, Vec2};
 
 use crate::capture::{self, Method, WindowInfo};
+use crate::cleanup::{self, Cleanup};
 use crate::encode::Format;
 use crate::pack::ZipSplit;
 use crate::recorder::{Config, Output, Recorder, SharedRecorder, State};
@@ -56,6 +57,10 @@ struct App {
     has_tray: bool,
     /// Whether edge docking is available (Windows only).
     docking: bool,
+    /// Old recordings waiting for the user to confirm they should be deleted.
+    cleanup: Option<Cleanup>,
+    /// What the last cleanup did, shown under the status until the next recording starts.
+    cleanup_note: Option<(String, bool)>,
 }
 
 impl App {
@@ -75,6 +80,8 @@ impl App {
             logo: load_logo(&cc.egui_ctx),
             has_tray,
             docking,
+            cleanup: None,
+            cleanup_note: None,
         };
         app.refresh_windows();
         if let Some(last) = &app.settings.last_window {
@@ -122,6 +129,7 @@ impl App {
         };
         self.settings.last_window = Some(window.title.clone());
         self.save_settings_if_changed();
+        self.cleanup_note = None;
         *self.recorder.lock().unwrap() = Some(Recorder::start(Config {
             window: window.id,
             title: window.title,
@@ -180,6 +188,19 @@ impl App {
 
             ui.label("Save to");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui
+                    .button("Clean up…")
+                    .on_hover_text("Delete the recordings SnapLapse saved in this folder. Asks first.")
+                    .clicked()
+                {
+                    let found = cleanup::scan(&self.settings.folder);
+                    if found.is_empty() {
+                        self.cleanup_note =
+                            Some(("There are no recordings in this folder to delete.".into(), false));
+                    } else {
+                        self.cleanup = Some(found);
+                    }
+                }
                 if ui.button("Open").on_hover_text("Show this folder").clicked() {
                     open_folder(&self.settings.folder);
                 }
@@ -362,6 +383,14 @@ impl App {
     fn status(&self, ui: &mut egui::Ui) {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            if let Some((note, is_error)) = &self.cleanup_note {
+                let text = RichText::new(note);
+                ui.label(if *is_error {
+                    text.color(WARN)
+                } else {
+                    text.strong()
+                });
+            }
             let Some(s) = self.with_recorder(|r| r.stats().snapshot()) else {
                 ui.label(RichText::new(self.idle_message()).weak());
                 return;
@@ -409,6 +438,68 @@ impl App {
                 );
             }
         });
+    }
+
+    /// Asks before deleting anything, listing exactly what will go.
+    fn confirm_cleanup(&mut self, ctx: &egui::Context) {
+        let Some(found) = &self.cleanup else {
+            return;
+        };
+        let count = found.items.len();
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("confirm_cleanup")).show(ctx, |ui| {
+            ui.set_max_width(400.0);
+            ui.label(RichText::new("Delete old recordings?").size(17.0).strong());
+            ui.add_space(6.0);
+            ui.label(format!(
+                "This permanently deletes {count} {} ({}) from {}. They don't go to the Recycle \
+                 Bin or Trash. Other files in the folder are left alone.",
+                plural(count),
+                cleanup::human_size(found.bytes),
+                self.settings.folder.display(),
+            ));
+            ui.add_space(6.0);
+            egui::ScrollArea::vertical()
+                .max_height(160.0)
+                .show(ui, |ui| {
+                    for item in &found.items {
+                        let name = item.file_name().unwrap_or_default().to_string_lossy();
+                        ui.add(egui::Label::new(RichText::new(name).weak()).truncate());
+                    }
+                });
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let delete =
+                    egui::Button::new(RichText::new("Delete").strong().color(Color32::WHITE))
+                        .fill(STOP_RED);
+                if ui.add(delete).clicked() {
+                    choice = Some(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(false);
+        }
+        match choice {
+            Some(true) => {
+                let found = self.cleanup.take().unwrap_or_default();
+                let (removed, error) = cleanup::delete(&found);
+                // The last recording's details may point at something just deleted.
+                *self.recorder.lock().unwrap() = None;
+                self.cleanup_note = Some(match error {
+                    None => (
+                        format!("Deleted {removed} {} from the folder.", plural(removed)),
+                        false,
+                    ),
+                    Some(e) => (format!("Deleted {removed} of {count}, but {e}"), true),
+                });
+            }
+            Some(false) => self.cleanup = None,
+            None => {}
+        }
     }
 
     fn idle_message(&self) -> String {
@@ -459,6 +550,9 @@ impl eframe::App for App {
                     self.status(ui);
                 });
         });
+        if !recording {
+            self.confirm_cleanup(ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -568,6 +662,14 @@ fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let size = [image.width() as usize, image.height() as usize];
     let pixels = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
     Some(ctx.load_texture("logo", pixels, egui::TextureOptions::LINEAR))
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 {
+        "item"
+    } else {
+        "items"
+    }
 }
 
 /// Shortens long titles with an ellipsis so the dropdown stays a sensible width.

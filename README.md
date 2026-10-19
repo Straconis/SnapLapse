@@ -29,6 +29,7 @@ Each recording gets its own folder, named with its start time and window, such a
 - **Choose the image format:** PNG, JPG or WebP.
 - **Mouse pointer on or off.** The **Include in screenshots** toggle decides whether the pointer appears in the pictures when it's over the window.
 - **Recordings never mix:** each one gets its own folder, or its own ZIP file, named with its start time.
+- **Clean up the save folder.** **Clean up…** deletes the recordings SnapLapse saved there, after showing you the list and asking first. Other files in the folder are never touched.
 - **Sortable file names:** files are numbered in order, like `000001 - Foundry VTT.png`.
 - **Close to tray (Windows).** Clicking X hides SnapLapse to an icon by the clock and recording carries on. Click the icon to bring it back, or right-click it to stop recording or quit. You can turn this off in the app.
 - **Auto-hide at a screen edge (Windows).** Turn on **Auto-hide when docked**, then drag SnapLapse against an edge of the screen. Dragging it to the top docks it there instead of going full screen. It hides when your mouse leaves and leaves a thin red marker on that edge, lined up with the window like a border, so you can see where it is and where it'll come back. Point at the marker to bring it back. Drag it away from the edge to undock.

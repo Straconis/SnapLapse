@@ -3,6 +3,7 @@
 
 mod app;
 mod capture;
+mod cleanup;
 mod cli;
 // The docking rules are only used on Windows, but they are tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
